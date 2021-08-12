@@ -347,8 +347,20 @@ impl<B: MysqlShim> MysqlIntermediary<B> {
                         }
                     })?
                     .1;
-
                 self.writer.set_seq(seq + 1);
+            } else if match self.shim.tls_config().iter().next() {
+                Some(conf) => conf.require_tls,
+                None => false,
+            } {
+                writers::write_err(
+                    ErrorKind::ER_ACCESS_DENIED_ERROR,
+                    "please connect with SSL enabled".as_ref(),
+                    &mut self.writer,
+                )?;
+                self.writer.flush()?;
+                return Err(
+                    io::Error::new(io::ErrorKind::Other, "client authentication failed").into(),
+                );
             }
         }
 

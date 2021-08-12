@@ -16,6 +16,8 @@ pub struct TlsConfig {
     pub server_cert_key: String,
     /// Optional full path to a folder of client certificates to validate against.
     pub client_cert_dir: Option<String>,
+    /// Require clients to use TLS?
+    pub require_tls: bool,
 }
 
 fn make_config(config: &TlsConfig) -> Result<Arc<rustls::ServerConfig>, io::Error> {
