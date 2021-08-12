@@ -2,7 +2,10 @@ use std::io::{BufReader, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::{fs, io};
 
-use rustls::{self, Connection, NoClientAuth, ServerConfig, ServerConnection};
+use rustls::{
+    self, AllowAnyAuthenticatedClient, Connection, NoClientAuth, RootCertStore, ServerConfig,
+    ServerConnection,
+};
 
 /// TLS configuration
 #[derive(Clone)]
@@ -11,9 +14,34 @@ pub struct TlsConfig {
     pub server_cert: String,
     /// Full path to the server key file.
     pub server_cert_key: String,
+    /// Optional full path to a folder of client certificates to validate against.
+    pub client_cert_dir: Option<String>,
 }
 
 fn make_config(config: &TlsConfig) -> Result<Arc<rustls::ServerConfig>, io::Error> {
+    let client_auth = if config.client_cert_dir.is_some() {
+        let mut client_auth_roots = RootCertStore::empty();
+
+        let paths = fs::read_dir(config.client_cert_dir.as_ref().unwrap()).unwrap();
+
+        for path in paths {
+            let path = path.unwrap();
+            if !path.path().is_file() {
+                continue;
+            }
+
+            let roots = load_cert(path.path().to_str().unwrap())?;
+
+            for root in roots {
+                client_auth_roots.add(&root).unwrap();
+            }
+        }
+
+        AllowAnyAuthenticatedClient::new(client_auth_roots)
+    } else {
+        NoClientAuth::new()
+    };
+
     let builder = ServerConfig::builder()
         .with_safe_default_cipher_suites()
         .with_safe_default_kx_groups()
@@ -24,7 +52,7 @@ fn make_config(config: &TlsConfig) -> Result<Arc<rustls::ServerConfig>, io::Erro
                 "inconsistent cipher-suites/versions specified",
             )
         })?
-        .with_client_cert_verifier(NoClientAuth::new());
+        .with_client_cert_verifier(client_auth);
 
     let mut server_config = {
         let certs = load_cert(&config.server_cert)?;
