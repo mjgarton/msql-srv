@@ -102,6 +102,7 @@ use std::iter;
 use std::net;
 
 use myc::constants::CapabilityFlags;
+pub use rustls::Certificate;
 
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 
@@ -186,6 +187,9 @@ pub trait MysqlShim {
     fn tls_config(&self) -> Option<&TlsConfig> {
         None
     }
+
+    /// Called after TLS handshake, providing the client certificate chain.
+    fn after_tls_handshake(&mut self, _client_certs: &[Certificate]) {}
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -313,6 +317,8 @@ impl<B: MysqlShim> MysqlIntermediary<B> {
                 let stream1 = tls::create_stream(rw, &config)?;
                 let stream2 = stream1.clone();
 
+                let stream3 = stream1.clone();
+
                 self.reader.r = Box::new(stream1);
                 self.writer.w = Box::new(stream2);
 
@@ -348,6 +354,10 @@ impl<B: MysqlShim> MysqlIntermediary<B> {
                     })?
                     .1;
                 self.writer.set_seq(seq + 1);
+
+                if let Some(certs) = stream3.client_certs()? {
+                    self.shim.after_tls_handshake(&certs);
+                }
             } else if match self.shim.tls_config().iter().next() {
                 Some(conf) => conf.require_tls,
                 None => false,

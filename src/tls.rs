@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::{fs, io};
 
 use rustls::{
-    self, AllowAnyAuthenticatedClient, Connection, NoClientAuth, RootCertStore, ServerConfig,
-    ServerConnection,
+    self, AllowAnyAuthenticatedClient, Certificate, Connection, NoClientAuth, RootCertStore,
+    ServerConfig, ServerConnection,
 };
 
 /// TLS configuration
@@ -151,6 +151,20 @@ where
         let stream = &mut self.stream.lock().unwrap();
 
         stream.read(buf)
+    }
+}
+
+impl<C, T> TlsStream<C, T>
+where
+    C: Connection,
+    T: Read + Write,
+{
+    pub fn client_certs(&self) -> Result<Option<Vec<Certificate>>, io::Error> {
+        let lk = self.stream.lock().unwrap();
+        match lk.conn.peer_certificates() {
+            Some(c) => Ok(Some(c.to_vec())),
+            None => Ok(None),
+        }
     }
 }
 
