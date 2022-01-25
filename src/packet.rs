@@ -77,8 +77,13 @@ impl<W: Read + Write> PacketConn<W> {
 
     #[cfg(feature = "tls")]
     pub fn switch_to_tls(&mut self, config: std::sync::Arc<ServerConfig>) -> io::Result<()> {
-        self.rw
-            .switch_to_tls(config, &self.bytes[self.bytes.len() - self.remaining..])
+        if self.remaining != 0 {
+            self.rw
+                .replace(&self.bytes[self.bytes.len() - self.remaining..]);
+            self.remaining = 0;
+        }
+
+        self.rw.switch_to_tls(config)
     }
 }
 
