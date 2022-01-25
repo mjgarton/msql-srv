@@ -1,4 +1,4 @@
-use std::io::{self, Chain, Cursor};
+use std::io::{self, Cursor};
 use std::io::{Read, Write};
 use std::sync::Arc;
 
@@ -50,16 +50,12 @@ impl<T: Read + Write> SwitchableConn<T> {
         SwitchableConn(Some(EitherConn::Plain(rw)))
     }
 
-    pub fn switch_to_tls(
-        &mut self,
-        config: Arc<ServerConfig>,
-        to_prepend: &[u8],
-    ) -> io::Result<()> {
+    pub fn switch_to_tls(&mut self, config: Arc<ServerConfig>, extra: &[u8]) -> io::Result<()> {
         let replacement = match self.0.take() {
-            Some(EitherConn::Plain(plain)) => Ok(EitherConn::Tls(create_stream(
-                PrependedReader::new(to_prepend, plain),
-                config,
-            )?)),
+            Some(EitherConn::Plain(plain)) => {
+                let plain = PrependedReader::new(plain, extra);
+                Ok(EitherConn::Tls(create_stream(plain, config)?))
+            }
             Some(EitherConn::Tls(_)) => Err(io::Error::new(
                 io::ErrorKind::Other,
                 "tls variant found when plain was expected",
@@ -73,30 +69,47 @@ impl<T: Read + Write> SwitchableConn<T> {
 }
 
 pub(crate) struct PrependedReader<RW: Read + Write> {
-    inner: Chain<Cursor<Vec<u8>>, RW>,
+    prepended: Option<Cursor<Vec<u8>>>,
+    inner: RW,
 }
 
 impl<RW: Read + Write> PrependedReader<RW> {
-    fn new(prepended: &[u8], rw: RW) -> PrependedReader<RW> {
+    fn new(rw: RW, prepended: &[u8]) -> PrependedReader<RW> {
         PrependedReader {
-            inner: Cursor::new(prepended.to_vec()).chain(rw),
+            inner: rw,
+            prepended: if prepended.is_empty() {
+                None
+            } else {
+                Some(Cursor::new(prepended.to_vec()))
+            },
         }
     }
 }
 
 impl<RW: Read + Write> Read for PrependedReader<RW> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.inner.read(buf)
+        match &mut self.prepended {
+            Some(r) => {
+                let i = r.read(buf)?;
+                if i != 0 {
+                    Ok(i)
+                } else {
+                    self.prepended = None;
+                    self.inner.read(buf)
+                }
+            }
+            None => self.inner.read(buf),
+        }
     }
 }
 
 impl<RW: Read + Write> Write for PrependedReader<RW> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.inner.get_mut().1.write(buf)
+        self.inner.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.inner.get_mut().1.flush()
+        self.inner.flush()
     }
 }
 
